@@ -115,6 +115,18 @@ async function deleteAdminUser(id){
   }catch(e){ console.error('delete admin user failed', e); }
 }
 
+const LOGO_BUCKET = 'cso-logos';
+async function uploadLogoFile(file){
+  try{
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g,'') || 'png';
+    const path = `logo-${Date.now()}.${ext}`;
+    const { error } = await sb.storage.from(LOGO_BUCKET).upload(path, file, { upsert: true, cacheControl: '3600' });
+    if(error){ console.error('logo upload failed', error); return null; }
+    const { data } = sb.storage.from(LOGO_BUCKET).getPublicUrl(path);
+    return data ? data.publicUrl : null;
+  }catch(e){ console.error('logo upload failed', e); return null; }
+}
+
 function brandMarkHtml(){
   const logo = ORG_SETTINGS && ORG_SETTINGS.logo_url;
   if(logo) return `<img src="${esc(logo)}" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:6px;" onerror="this.style.display='none';this.parentElement.textContent='Δ';">`;
@@ -127,6 +139,15 @@ function brandTextHtml(){
   const line1 = esc(parts.slice(0,mid).join(' '));
   const line2 = esc(parts.slice(mid).join(' '));
   return `${line1}${line2?'<br>'+line2:''}<small>REACH CSO Programme</small>`;
+}
+function landingBrandLockupHtml(){
+  const logo = ORG_SETTINGS && ORG_SETTINGS.logo_url;
+  const name = ORG_SETTINGS && ORG_SETTINGS.org_name;
+  if(!logo && !name) return ''; // nothing custom set yet — keep the plain hero as-is
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+    ${logo ? `<img src="${esc(logo)}" alt="" style="width:40px;height:40px;object-fit:contain;border-radius:7px;border:1px solid var(--line);background:var(--card-hi);" onerror="this.style.display='none';">` : ''}
+    <span style="font-family:var(--font-display);font-weight:600;font-size:16px;color:var(--ink);">${esc(name||'')}</span>
+  </div>`;
 }
 
 function scheduleSave(){
@@ -348,10 +369,17 @@ function renderLanding(){
       <div class="meta" style="margin-top:8px;">Updated ${new Date(o.updatedAt).toLocaleDateString()}</div>
     </div>`).join('');
 
+  const contactBits = [
+    ORG_SETTINGS && ORG_SETTINGS.contact_email,
+    ORG_SETTINGS && ORG_SETTINGS.contact_phone,
+    ORG_SETTINGS && ORG_SETTINGS.address,
+  ].filter(Boolean);
+
   app.innerHTML = `
   <div class="landing">
     <div class="landing-wrap">
       <div class="landing-hero">
+        ${landingBrandLockupHtml()}
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;">
           <div class="eyebrow">Organisational capacity &amp; impact instrument</div>
           <button class="btn btn-ghost btn-sm" id="btn-admin-login">🔒 Admin login</button>
@@ -367,6 +395,7 @@ function renderLanding(){
         <div class="card new-org-card" id="btn-new-org">+ New assessment</div>
       </div>
       ${ORG_LIST_CACHE.length===0 ? '<p class="muted" style="margin-top:14px;font-size:12.6px;">No saved organisations yet — start one above. Everything you enter is saved automatically as you go.</p>' : ''}
+      ${contactBits.length ? `<p class="muted" style="margin-top:26px;font-size:11.8px;">${contactBits.map(esc).join(' · ')}</p>` : ''}
     </div>
   </div>`;
   document.getElementById('btn-admin-login').addEventListener('click', openAdminLoginModal);
@@ -1283,8 +1312,15 @@ function paintAdminSettings(settings){
             <input type="text" id="s-org-name" value="${esc(settings.org_name||'')}">
           </div>
           <div class="field">
-            <label class="field-label">Logo URL</label>
-            <input type="text" id="s-logo-url" value="${esc(settings.logo_url||'')}" placeholder="https://…/logo.png">
+            <label class="field-label">Logo</label>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <div id="logo-preview" style="width:52px;height:52px;flex:0 0 52px;border-radius:8px;border:1.4px solid var(--line);background:var(--paper) center/contain no-repeat;${settings.logo_url?`background-image:url('${esc(settings.logo_url)}');`:''}"></div>
+              <div style="flex:1;">
+                <input type="file" id="s-logo-file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style="font-size:12px;">
+                <div class="muted" id="logo-status" style="font-size:11px;margin-top:4px;">${settings.logo_url? 'Current logo uploaded.' : 'No logo uploaded yet.'}</div>
+              </div>
+            </div>
+            <input type="hidden" id="s-logo-url" value="${esc(settings.logo_url||'')}">
           </div>
         </div>
         <div class="field-row">
@@ -1303,7 +1339,7 @@ function paintAdminSettings(settings){
         </div>
         <p class="muted" style="font-size:11.8px;margin:2px 0 14px;">
           The name and logo appear in the sidebar and on the landing page across the whole app.
-          Paste a link to an already-hosted image for the logo — there's no file upload here yet.
+          The logo uploads and saves immediately; the other fields save with the button below.
         </p>
         <div class="btn-row">
           <button class="btn btn-gold" id="s-save">Save company details</button>
@@ -1324,6 +1360,29 @@ function paintAdminSettings(settings){
   </div>`;
 
   document.getElementById('btn-settings-back').addEventListener('click', renderAdminDashboard);
+
+  document.getElementById('s-logo-file').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const status = document.getElementById('logo-status');
+    const preview = document.getElementById('logo-preview');
+    if(file.size > 2*1024*1024){
+      status.textContent = 'That file is over 2MB — please use a smaller image.';
+      return;
+    }
+    status.textContent = 'Uploading…';
+    const url = await uploadLogoFile(file);
+    if(url){
+      document.getElementById('s-logo-url').value = url;
+      preview.style.backgroundImage = `url('${url}')`;
+      status.textContent = 'Uploaded. Saving…';
+      const ok = await saveOrgSettings({ logo_url: url });
+      status.textContent = ok ? 'Logo saved.' : 'Uploaded, but saving failed — try again.';
+      if(ok) showToast('Logo updated');
+    } else {
+      status.textContent = 'Upload failed — check your connection and try again.';
+    }
+  });
 
   document.getElementById('s-save').addEventListener('click', async ()=>{
     const btn = document.getElementById('s-save');
