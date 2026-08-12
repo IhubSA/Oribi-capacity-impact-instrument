@@ -233,7 +233,7 @@ function fmtIndValue(ind, v){
   if(v===null||v===undefined) return '—';
   if(ind.unit==='percent_frac') return (v<=1? (v*100).toFixed(0) : v.toFixed(0)) + '%';
   if(ind.unit==='percent_num') return v.toFixed(0)+'%';
-  if(ind.unit==='currency') return '€'+v.toLocaleString();
+  if(ind.unit==='currency') return 'R'+v.toLocaleString();
   if(ind.unit==='days') return v.toFixed(0)+' d';
   return (Number.isInteger(v) ? v : v.toFixed(1)).toString();
 }
