@@ -75,6 +75,60 @@ async function verifyAdminPassword(pw){
   }catch(e){ console.error('admin check failed', e); return false; }
 }
 
+/* ---------------- org/company settings + admin directory ---------------- */
+let ORG_SETTINGS = null; // cached after first load: {org_name, logo_url, primary_color, contact_email, contact_phone, address}
+
+async function loadOrgSettings(){
+  try{
+    const { data, error } = await sb.from('cso_org_settings').select('*').eq('id', 1).maybeSingle();
+    if(error || !data) return null;
+    ORG_SETTINGS = data;
+    return data;
+  }catch(e){ console.error('load org settings failed', e); return null; }
+}
+async function saveOrgSettings(fields){
+  try{
+    const { error } = await sb.from('cso_org_settings').update(fields).eq('id', 1);
+    if(error){ console.error('save org settings failed', error); showToast('Could not save — check connection'); return false; }
+    ORG_SETTINGS = { ...(ORG_SETTINGS||{}), ...fields };
+    return true;
+  }catch(e){ console.error('save org settings failed', e); showToast('Could not save — check connection'); return false; }
+}
+async function listAdminUsers(){
+  try{
+    const { data, error } = await sb.from('cso_admin_users').select('*').order('created_at', { ascending:true });
+    if(error){ console.error('list admin users failed', error); return []; }
+    return data||[];
+  }catch(e){ console.error('list admin users failed', e); return []; }
+}
+async function addAdminUser(user){
+  try{
+    const { error } = await sb.from('cso_admin_users').insert(user);
+    if(error){ console.error('add admin user failed', error); showToast('Could not save — check connection'); return false; }
+    return true;
+  }catch(e){ console.error('add admin user failed', e); showToast('Could not save — check connection'); return false; }
+}
+async function deleteAdminUser(id){
+  try{
+    const { error } = await sb.from('cso_admin_users').delete().eq('id', id);
+    if(error) console.error('delete admin user failed', error);
+  }catch(e){ console.error('delete admin user failed', e); }
+}
+
+function brandMarkHtml(){
+  const logo = ORG_SETTINGS && ORG_SETTINGS.logo_url;
+  if(logo) return `<img src="${esc(logo)}" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:6px;" onerror="this.style.display='none';this.parentElement.textContent='Δ';">`;
+  return 'Δ';
+}
+function brandTextHtml(){
+  const name = (ORG_SETTINGS && ORG_SETTINGS.org_name) || 'Capacity & Impact Instrument';
+  const parts = name.split(' ');
+  const mid = Math.ceil(parts.length/2);
+  const line1 = esc(parts.slice(0,mid).join(' '));
+  const line2 = esc(parts.slice(mid).join(' '));
+  return `${line1}${line2?'<br>'+line2:''}<small>REACH CSO Programme</small>`;
+}
+
 function scheduleSave(){
   STATE.updatedAt = new Date().toISOString();
   if(SAVE_TIMER) clearTimeout(SAVE_TIMER);
@@ -204,7 +258,7 @@ function orgMEEnteredCount(org){
 function indParseEntry(idx, month){
   const rec = STATE.me[idx].months[month];
   if(!rec) return null;
-  n = parseFloat(String(rec.result).replace(/[€R,\s]/gi,''));
+  const n = parseFloat(String(rec.result).replace(/[€R,\s]/gi,''));
   return isNaN(n) ? null : n;
 }
 function indCumulated(ind, uptoMonth){
@@ -274,7 +328,8 @@ function el(html){ const d=document.createElement('div'); d.innerHTML=html.trim(
 async function boot(){
   const app = document.getElementById('app');
   app.innerHTML = '<div class="landing"><div class="spinner"></div></div>';
-  ORG_LIST_CACHE = await storageListOrgs();
+  const [orgs] = await Promise.all([storageListOrgs(), loadOrgSettings()]);
+  ORG_LIST_CACHE = orgs;
   renderLanding();
 }
 
@@ -432,8 +487,8 @@ function renderShell(){
     <div class="shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">Δ</div>
-          <div class="brand-text">Capacity &amp; Impact<br>Instrument<small>REACH CSO Programme</small></div>
+          <div class="brand-mark">${brandMarkHtml()}</div>
+          <div class="brand-text">${brandTextHtml()}</div>
         </div>
         <div class="org-switch" id="org-switch">
           <div class="lbl">Organisation</div>
@@ -466,6 +521,9 @@ function renderShell(){
     const item = el(`<div class="nav-item"><span class="ico">◈</span><span class="txt">Admin dashboard</span></div>`);
     item.addEventListener('click', renderAdminDashboard);
     navAdmin.appendChild(item);
+    const settingsItem = el(`<div class="nav-item"><span class="ico">⚙</span><span class="txt">Settings</span></div>`);
+    settingsItem.addEventListener('click', renderAdminSettings);
+    navAdmin.appendChild(settingsItem);
   }
 
   const navTop = document.getElementById('nav-top');
@@ -1094,8 +1152,15 @@ function paintAdminDashboard(){
             <p style="max-width:70ch;">Every organisation saved to this instrument, with capacity scores and
             M&amp;E progress rolled up in one place.</p>
           </div>
-          <button class="btn btn-ghost btn-sm" id="btn-admin-logout">Log out of admin</button>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost btn-sm" id="btn-admin-settings">⚙ Settings</button>
+            <button class="btn btn-ghost btn-sm" id="btn-admin-logout">Log out of admin</button>
+          </div>
         </div>
+      </div>
+
+      <div class="btn-row no-print" style="margin-bottom:20px;">
+        <button class="btn btn-gold" id="btn-admin-new-org">+ New assessment</button>
       </div>
 
       <div class="grid grid-4" style="margin-bottom:20px;">
@@ -1154,6 +1219,8 @@ function paintAdminDashboard(){
     IS_ADMIN = false;
     renderLanding();
   });
+  document.getElementById('btn-admin-settings').addEventListener('click', renderAdminSettings);
+  document.getElementById('btn-admin-new-org').addEventListener('click', openNewOrgModal);
   const search = document.getElementById('admin-search');
   search.addEventListener('input', ()=>{ ADMIN_FILTER = search.value; paintAdminDashboard(); document.getElementById('admin-search').focus(); });
 
@@ -1177,6 +1244,180 @@ function paintAdminDashboard(){
       ADMIN_ORGS_CACHE = ADMIN_ORGS_CACHE.filter(o=>o.id!==id);
       paintAdminDashboard();
     });
+  });
+}
+
+/* ===================== Admin settings (company details + admin directory) ===================== */
+let ADMIN_USERS_CACHE = [];
+
+async function renderAdminSettings(){
+  VIEW = 'admin-settings'; STATE = null;
+  const app = document.getElementById('app');
+  app.innerHTML = '<div class="landing"><div class="spinner"></div></div>';
+  const [settings, users] = await Promise.all([loadOrgSettings(), listAdminUsers()]);
+  ADMIN_USERS_CACHE = users;
+  paintAdminSettings(settings || {});
+}
+
+function paintAdminSettings(settings){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+  <div class="landing" style="align-items:flex-start;">
+    <div class="landing-wrap" style="max-width:820px;">
+      <div class="landing-hero">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;">
+          <div>
+            <div class="eyebrow">Admin · Settings</div>
+            <h1 style="font-size:28px;">Programme &amp; account settings</h1>
+            <p style="max-width:70ch;">Company details shown around the app, and a directory of who has admin access.</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btn-settings-back">← Admin dashboard</button>
+        </div>
+      </div>
+
+      <div class="card card-pad" style="margin-bottom:16px;">
+        <div class="section-head" style="margin-top:0;"><h3>Company details</h3><div class="section-line"></div></div>
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Organisation / programme name</label>
+            <input type="text" id="s-org-name" value="${esc(settings.org_name||'')}">
+          </div>
+          <div class="field">
+            <label class="field-label">Logo URL</label>
+            <input type="text" id="s-logo-url" value="${esc(settings.logo_url||'')}" placeholder="https://…/logo.png">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Contact email</label>
+            <input type="email" id="s-contact-email" value="${esc(settings.contact_email||'')}">
+          </div>
+          <div class="field">
+            <label class="field-label">Contact phone</label>
+            <input type="text" id="s-contact-phone" value="${esc(settings.contact_phone||'')}">
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Address</label>
+          <input type="text" id="s-address" value="${esc(settings.address||'')}">
+        </div>
+        <p class="muted" style="font-size:11.8px;margin:2px 0 14px;">
+          The name and logo appear in the sidebar and on the landing page across the whole app.
+          Paste a link to an already-hosted image for the logo — there's no file upload here yet.
+        </p>
+        <div class="btn-row">
+          <button class="btn btn-gold" id="s-save">Save company details</button>
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="section-head" style="margin-top:0;"><h3>Admin directory</h3><div class="section-line"></div></div>
+        <p class="muted" style="font-size:11.8px;margin-bottom:12px;">
+          This is a contact list, not a login system — everyone listed here still shares the one
+          admin password on the login screen. Real individual logins would need a bigger change
+          (Supabase Auth); ask if you want that built out.
+        </p>
+        <div id="admin-users-table"></div>
+        <button class="btn btn-ghost btn-sm" id="s-add-user" style="margin-top:10px;">+ Add admin</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('btn-settings-back').addEventListener('click', renderAdminDashboard);
+
+  document.getElementById('s-save').addEventListener('click', async ()=>{
+    const btn = document.getElementById('s-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    const ok = await saveOrgSettings({
+      org_name: document.getElementById('s-org-name').value.trim() || 'Capacity & Impact Instrument',
+      logo_url: document.getElementById('s-logo-url').value.trim(),
+      contact_email: document.getElementById('s-contact-email').value.trim(),
+      contact_phone: document.getElementById('s-contact-phone').value.trim(),
+      address: document.getElementById('s-address').value.trim(),
+    });
+    btn.disabled = false; btn.textContent = 'Save company details';
+    if(ok) showToast('Company details saved');
+  });
+
+  renderAdminUsersTable();
+  document.getElementById('s-add-user').addEventListener('click', openAddAdminUserModal);
+}
+
+function renderAdminUsersTable(){
+  const holder = document.getElementById('admin-users-table');
+  if(ADMIN_USERS_CACHE.length===0){
+    holder.innerHTML = '<p class="muted" style="font-size:12.6px;">No admins listed yet.</p>';
+    return;
+  }
+  holder.innerHTML = `
+    <table class="mini-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead>
+      <tbody>
+        ${ADMIN_USERS_CACHE.map(u=>`
+          <tr>
+            <td>${esc(u.name)}</td>
+            <td>${esc(u.email||'—')}</td>
+            <td>${esc(u.role||'Admin')}</td>
+            <td><button class="row-del" data-del="${esc(u.id)}" title="Remove">×</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+  holder.querySelectorAll('[data-del]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.getAttribute('data-del');
+      const u = ADMIN_USERS_CACHE.find(x=>x.id===id);
+      if(!confirm(`Remove ${u?u.name:'this admin'} from the directory?`)) return;
+      await deleteAdminUser(id);
+      ADMIN_USERS_CACHE = ADMIN_USERS_CACHE.filter(x=>x.id!==id);
+      renderAdminUsersTable();
+    });
+  });
+}
+
+function openAddAdminUserModal(){
+  const backdrop = el(`
+    <div class="modal-backdrop">
+      <div class="modal">
+        <h3>Add admin</h3>
+        <div class="field">
+          <label class="field-label">Name</label>
+          <input type="text" id="au-name" placeholder="e.g. Thandiwe Nkosi">
+        </div>
+        <div class="field">
+          <label class="field-label">Email</label>
+          <input type="email" id="au-email" placeholder="name@example.org">
+        </div>
+        <div class="field">
+          <label class="field-label">Role</label>
+          <select id="au-role">
+            <option value="Admin">Admin</option>
+            <option value="Programme Manager">Programme Manager</option>
+            <option value="Assessor">Assessor</option>
+          </select>
+        </div>
+        <div class="btn-row" style="justify-content:flex-end;margin-top:6px;">
+          <button class="btn btn-ghost" id="au-cancel">Cancel</button>
+          <button class="btn btn-gold" id="au-save">Add</button>
+        </div>
+      </div>
+    </div>`);
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) backdrop.remove(); });
+  document.getElementById('au-cancel').addEventListener('click', ()=>backdrop.remove());
+  document.getElementById('au-save').addEventListener('click', async ()=>{
+    const name = document.getElementById('au-name').value.trim();
+    if(!name){ showToast('Enter a name'); return; }
+    const user = {
+      name,
+      email: document.getElementById('au-email').value.trim(),
+      role: document.getElementById('au-role').value,
+    };
+    const ok = await addAdminUser(user);
+    backdrop.remove();
+    if(ok){
+      ADMIN_USERS_CACHE = await listAdminUsers();
+      renderAdminUsersTable();
+    }
   });
 }
 /* ===================== Summary & Report ===================== */
