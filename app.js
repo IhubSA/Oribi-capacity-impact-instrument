@@ -204,7 +204,7 @@ function orgMEEnteredCount(org){
 function indParseEntry(idx, month){
   const rec = STATE.me[idx].months[month];
   if(!rec) return null;
-  const n = parseFloat(String(rec.result).replace(/[€,\s]/g,''));
+  n = parseFloat(String(rec.result).replace(/[€R,\s]/gi,''));
   return isNaN(n) ? null : n;
 }
 function indCumulated(ind, uptoMonth){
