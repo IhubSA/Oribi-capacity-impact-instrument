@@ -380,7 +380,7 @@ function renderLanding(){
     <div class="landing-wrap">
       <div class="landing-hero">
         ${landingBrandLockupHtml()}
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">
           <div class="eyebrow">Organisational capacity &amp; impact instrument</div>
           <button class="btn btn-ghost btn-sm" id="btn-admin-login">🔒 Admin login</button>
         </div>
@@ -514,7 +514,12 @@ function renderShell(){
   const app = document.getElementById('app');
   app.innerHTML = `
     <div class="shell">
-      <aside class="sidebar">
+      <div class="mobile-topbar" id="mobile-topbar">
+        <button class="hamburger" id="mobile-hamburger" aria-label="Open menu">☰</button>
+        <div class="mt-name">${esc(STATE.name)}</div>
+      </div>
+      <div class="mobile-backdrop" id="mobile-backdrop"></div>
+      <aside class="sidebar" id="app-sidebar">
         <div class="brand">
           <div class="brand-mark">${brandMarkHtml()}</div>
           <div class="brand-text">${brandTextHtml()}</div>
@@ -540,6 +545,13 @@ function renderShell(){
       </aside>
       <main class="main" id="main"></main>
     </div>`;
+
+  const sidebarEl = document.getElementById('app-sidebar');
+  const backdropEl = document.getElementById('mobile-backdrop');
+  function openMobileNav(){ sidebarEl.classList.add('mobile-open'); backdropEl.classList.add('show'); }
+  function closeMobileNav(){ sidebarEl.classList.remove('mobile-open'); backdropEl.classList.remove('show'); }
+  document.getElementById('mobile-hamburger').addEventListener('click', openMobileNav);
+  backdropEl.addEventListener('click', closeMobileNav);
 
   document.getElementById('org-switch').addEventListener('click', ()=>{
     if(IS_ADMIN) renderAdminDashboard(); else renderLandingFromShell();
@@ -1174,7 +1186,7 @@ function paintAdminDashboard(){
   <div class="landing" style="align-items:flex-start;">
     <div class="landing-wrap" style="max-width:1080px;">
       <div class="landing-hero">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">
           <div>
             <div class="eyebrow">Admin · REACH programme</div>
             <h1 style="font-size:28px;">Programme dashboard</h1>
@@ -1294,7 +1306,7 @@ function paintAdminSettings(settings){
   <div class="landing" style="align-items:flex-start;">
     <div class="landing-wrap" style="max-width:820px;">
       <div class="landing-hero">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">
           <div>
             <div class="eyebrow">Admin · Settings</div>
             <h1 style="font-size:28px;">Programme &amp; account settings</h1>
